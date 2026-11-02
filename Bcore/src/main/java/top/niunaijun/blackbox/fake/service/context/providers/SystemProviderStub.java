@@ -1,5 +1,10 @@
 package top.niunaijun.blackbox.fake.service.context.providers;
 
+import android.os.Bundle;
+import android.util.Log;
+import top.niunaijun.blackbox.app.BActivityThread;
+import top.niunaijun.blackbox.fake.spoof.SpoofStore;
+
 import android.os.IInterface;
 
 import java.lang.reflect.Method;
@@ -9,97 +14,116 @@ import top.niunaijun.blackbox.BlackBoxCore;
 import top.niunaijun.blackbox.fake.hook.ClassInvocationStub;
 import top.niunaijun.blackbox.utils.compat.ContextCompat;
 
-
 public class SystemProviderStub extends ClassInvocationStub implements BContentProvider {
-    private IInterface mBase;
+  private IInterface mBase;
 
-    @Override
-    public IInterface wrapper(IInterface contentProviderProxy, String appPkg) {
-        mBase = contentProviderProxy;
-        injectHook();
-        return (IInterface) getProxyInvocation();
+  @Override
+  public IInterface wrapper(IInterface contentProviderProxy, String appPkg) {
+    mBase = contentProviderProxy;
+    injectHook();
+    return (IInterface) getProxyInvocation();
+  }
+
+  @Override
+  protected Object getWho() {
+    return mBase;
+  }
+
+  @Override
+  protected void inject(Object baseInvocation, Object proxyInvocation) {
+
+  }
+
+  @Override
+  protected void onBindMethod() {
+
+  }
+
+  @Override
+  public boolean isBadEnv() {
+    return false;
+  }
+
+  @Override
+  public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+    if ("asBinder".equals(method.getName())) {
+      return method.invoke(mBase, args);
     }
 
-    @Override
-    protected Object getWho() {
-        return mBase;
-    }
+    String methodName = method.getName();
 
-    @Override
-    protected void inject(Object baseInvocation, Object proxyInvocation) {
+    if ("call".equals(methodName)) {
 
-    }
+      if (args != null) {
+        Class<?> attributionSourceClass = BRAttributionSource.getRealClass();
+        for (int i = 0; i < args.length; i++) {
+          Object arg = args[i];
 
-    @Override
-    protected void onBindMethod() {
-
-    }
-
-    @Override
-    public boolean isBadEnv() {
-        return false;
-    }
-
-    @Override
-    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-        if ("asBinder".equals(method.getName())) {
-            return method.invoke(mBase, args);
+          if (arg != null && attributionSourceClass != null &&
+              arg.getClass().getName().equals(attributionSourceClass.getName())) {
+            ContextCompat.fixAttributionSourceState(arg, BlackBoxCore.getHostUid());
+          }
         }
-        
-        String methodName = method.getName();
-        
-        
-        
-        if ("call".equals(methodName)) {
-            
-            if (args != null) {
-                Class<?> attributionSourceClass = BRAttributionSource.getRealClass();
-                for (int i = 0; i < args.length; i++) {
-                    Object arg = args[i];
-                    
-                    if (arg != null && attributionSourceClass != null && 
-                            arg.getClass().getName().equals(attributionSourceClass.getName())) {
-                        ContextCompat.fixAttributionSourceState(arg, BlackBoxCore.getHostUid());
-                    }
-                }
-            }
-            return method.invoke(mBase, args);
-        }
-        
-        
-        if (args != null && args.length > 0) {
-            Object arg = args[0];
-            if (arg instanceof String) {
-                String authority = (String) arg;
-                
-                if (!isSystemProviderAuthority(authority)) {
-                    args[0] = BlackBoxCore.getHostPkg();
-                }
-            } else if (arg != null) {
-                Class<?> attrSourceClass = BRAttributionSource.getRealClass();
-                
-                if (attrSourceClass != null && arg.getClass().getName().equals(attrSourceClass.getName())) {
-                    ContextCompat.fixAttributionSourceState(arg, BlackBoxCore.getHostUid());
-                }
-            }
-        }
-        return method.invoke(mBase, args);
+      }
+      return spoofSettingsResult(args, method.invoke(mBase, args));
     }
+    if (args != null && args.length > 0) {
+      Object arg = args[0];
+      if (arg instanceof String) {
+        String authority = (String) arg;
 
-    private boolean isSystemProviderAuthority(String authority) {
-        if (authority == null) return false;
-        
-        return authority.equals("settings") || 
-               authority.equals("media") || 
-               authority.equals("downloads") || 
-               authority.equals("contacts") || 
-               authority.equals("call_log") || 
-               authority.equals("telephony") || 
-               authority.equals("calendar") || 
-               authority.equals("browser") || 
-               authority.equals("user_dictionary") || 
-               authority.equals("applications") ||
-               authority.startsWith("com.android.") ||
-               authority.startsWith("android.");
+        if (!isSystemProviderAuthority(authority)) {
+          args[0] = BlackBoxCore.getHostPkg();
+        }
+      } else if (arg != null) {
+        Class<?> attrSourceClass = BRAttributionSource.getRealClass();
+
+        if (attrSourceClass != null && arg.getClass().getName().equals(attrSourceClass.getName())) {
+          ContextCompat.fixAttributionSourceState(arg, BlackBoxCore.getHostUid());
+        }
+      }
     }
+    return method.invoke(mBase, args);
+  }
+
+  /** Replaces the Settings.Secure android_id result with the profile's own ID. */
+  private static Object spoofSettingsResult(Object[] args, Object result) {
+    try {
+      if (args == null)
+        return result;
+      for (int i = 0; i < args.length - 1; i++) {
+        if ("GET_secure".equals(args[i]) && "android_id".equals(args[i + 1])) {
+          int userId = BActivityThread.getUserId();
+          if (userId < 0)
+            return result; // not a virtual profile (host process)
+          String id = SpoofStore.get(userId).androidId;
+          Bundle bundle = result instanceof Bundle ? (Bundle) result : new Bundle();
+          bundle.putString("value", id);
+          Log.i("SpoofAndroidId", "android_id overridden for profile " + userId + ": " + id.substring(0, 6) + "...");
+          return bundle;
+        }
+      }
+    } catch (Throwable t) {
+      Log.w("SpoofAndroidId", "failed to override android_id", t);
+    }
+    return result;
+  }
+
+  private boolean isSystemProviderAuthority(String authority) {
+    if (authority == null)
+      return false;
+
+    return authority.equals("settings") ||
+        authority.equals("media") ||
+        authority.equals("downloads") ||
+        authority.equals("contacts") ||
+        authority.equals("call_log") ||
+        authority.equals("telephony") ||
+        authority.equals("calendar") ||
+        authority.equals("browser") ||
+        authority.equals("user_dictionary") ||
+        authority.equals("applications") ||
+        authority.startsWith("com.android.") ||
+        authority.startsWith("android.");
+  }
 }
