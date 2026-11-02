@@ -1,7 +1,11 @@
 # Phantom-Sandbox
 
-[//]: # will be edited
-[//]: # BlackBox is a virtual engine that allows you to clone and run virtual applications on Android devices without installing APKs. This project works on Android 5.0 to 14.0+ and supports multiple architectures (ARM64, ARMv7, x86).
+<!--
+
+will be edited
+BlackBox is a virtual engine that allows you to clone and run virtual applications on Android devices without installing APKs. This project works on Android 5.0 to 14.0+ and supports multiple architectures (ARM64, ARMv7, x86).
+
+-->
 
 ## Overview
 
